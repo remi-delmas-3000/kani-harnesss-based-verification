@@ -1,0 +1,6 @@
+[package]
+name = "kani-harnesss-based-verification"
+version = "0.1.0"
+edition = "2024"
+
+[dependencies]
