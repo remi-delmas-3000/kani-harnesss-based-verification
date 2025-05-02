@@ -6,3 +6,4 @@ cargo bolero test bolero_tests::fuzz_push_pop --runs 100000
 cargo bolero test bolero_tests::fuzz_push_capacity --runs 100000
 cargo bolero test bolero_tests::fuzz_resize --runs 100000
 cargo bolero test bolero_tests::fuzz_transition_to_heap --runs 100000
+cargo kani --jobs 8 --output-format=terse

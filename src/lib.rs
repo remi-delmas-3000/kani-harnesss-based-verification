@@ -166,7 +166,7 @@ impl ByteBuffer {
                 } else {
                     // the old layout
                     let layout =
-                        Layout::from_size_align(self.cap, align_of::<u8>()).unwrap();
+                        Layout::from_size_align(self.cap - MIN_CAP, align_of::<u8>()).unwrap();
                     unsafe {
                         alloc::realloc(self.hbuf.as_ptr() as *mut u8, layout, new_cap - MIN_CAP)
                     }
@@ -187,7 +187,7 @@ impl ByteBuffer {
 impl Drop for ByteBuffer {
     fn drop(&mut self) {
         if self.hbuf != NonNull::dangling() {
-            let layout = Layout::from_size_align(self.cap, align_of::<u8>()).unwrap();
+            let layout = Layout::from_size_align(self.cap - MIN_CAP, align_of::<u8>()).unwrap();
             unsafe {
                 alloc::dealloc(self.hbuf.as_ptr(), layout);
             }
