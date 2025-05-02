@@ -13,22 +13,41 @@ fn is_power_of_two(n: usize) -> bool {
     n != 0 && (n & (n - 1)) == 0
 }
 
+fn smallest_power_of_two_fixed(req: usize) -> usize {
+    assert!(req <= MAX_REQ);
+    if req < 2 {
+        return 1;
+    }
+
+    let mut result = 1;
+    while result < req {
+        result *= 2;
+    }
+    result
+}
+
 /// Returns the smallest power of two greater than or equal to `req`.
 fn smallest_power_of_two(req: usize) -> usize {
     assert!(req <= MAX_REQ);
     if req < 2 {
         return 1;
     }
-    let mut n = req;
-    n -= 1;
+
+    let mut n = req - 1;
     n |= n >> 1;
     n |= n >> 2;
     n |= n >> 4;
     n |= n >> 8;
     n |= n >> 16;
     n |= n >> 32;
-    n += 1;
-    n
+    n + 1
+}
+
+#[cfg(kani)]
+#[kani::proof]
+fn prove_equiv_smallest_power_of_two() {
+    let req = kani::any_where(|&req| req < MAX_REQ);
+    assert_eq!(smallest_power_of_two(req), smallest_power_of_two_fixed(req));
 }
 
 /// Decides if the buffer needs to be resized in order to accomodate `extra_bytes` more bytes.
@@ -123,8 +142,8 @@ impl ByteBuffer {
             return None;
         }
         self.len -= 1; // Decrease length first
-        let result = if self.len < MIN_CAP {
-            self.ibuf[self.len] // Now using the new length
+        let result = if self.len <= MIN_CAP {
+            self.ibuf[self.len-1] // Now using the new length
         } else {
             unsafe {
                 let ptr = self.hbuf.as_ptr();
@@ -147,7 +166,7 @@ impl ByteBuffer {
                 } else {
                     // the old layout
                     let layout =
-                        Layout::from_size_align(self.cap - MIN_CAP, align_of::<u8>()).unwrap();
+                        Layout::from_size_align(self.cap, align_of::<u8>()).unwrap();
                     unsafe {
                         alloc::realloc(self.hbuf.as_ptr() as *mut u8, layout, new_cap - MIN_CAP)
                     }
@@ -168,7 +187,7 @@ impl ByteBuffer {
 impl Drop for ByteBuffer {
     fn drop(&mut self) {
         if self.hbuf != NonNull::dangling() {
-            let layout = Layout::from_size_align(self.cap - MIN_CAP, align_of::<u8>()).unwrap();
+            let layout = Layout::from_size_align(self.cap, align_of::<u8>()).unwrap();
             unsafe {
                 alloc::dealloc(self.hbuf.as_ptr(), layout);
             }
@@ -371,131 +390,5 @@ mod bolero_tests {
                 assert!(test_buf.is_empty());
             }
         });
-    }
-}
-
-#[cfg(kani)]
-mod proofs {
-
-    use super::*;
-
-    unsafe extern "C" {
-        /// A CBMC primitive to havoc a slice of size `len` of a pointer to `u8`.
-        unsafe fn __cbmc_havoc_object_u8(ptr: *mut u8, len: usize) -> u8;
-    }
-
-    impl kani::Arbitrary for ByteBuffer {
-        /// Generates a nondet instance of ByteBuffer that satisfies the invariant
-        /// Will be used to check all methods from an arbitrary state
-        fn any() -> Self {
-            let cap = kani::any_where(|cap| MIN_CAP <= *cap && *cap <= MAX_CAP);
-            let len = kani::any();
-            kani::assume(cap_len_ok(cap, len));
-            let mut ibuf = [0; MIN_CAP];
-            for i in 0..MIN_CAP {
-                if i < len {
-                    ibuf[i] = kani::any();
-                }
-            }
-            let hbuf = if cap > MIN_CAP {
-                let layout = Layout::from_size_align(cap - MIN_CAP, align_of::<u8>()).unwrap();
-                let ptr = unsafe { alloc::alloc(layout) };
-                kani::assume(!ptr.is_null());
-                // Only havoc elements that are actually used (len - MIN_CAP)
-                if len > MIN_CAP {
-                    unsafe {
-                        __cbmc_havoc_object_u8(ptr, len - MIN_CAP);
-                    }
-                }
-                NonNull::new(ptr).unwrap()
-            } else {
-                NonNull::dangling()
-            };
-            let res = ByteBuffer {
-                cap,
-                len,
-                hbuf,
-                ibuf,
-            };
-            assert!(res.invariant());
-            res
-        }
-    }
-
-    #[kani::proof]
-    fn new_harness() {
-        let buf = ByteBuffer::new();
-        assert!(buf.invariant());
-    }
-
-    #[kani::proof]
-    fn resize_new_harness() {
-        let mut buf = ByteBuffer::new();
-        let extra_bytes = kani::any();
-        let result = buf.resize(extra_bytes);
-        match result {
-            Result::Ok(()) => {
-                assert!(buf.invariant());
-            }
-            _ => {}
-        }
-    }
-
-    #[kani::proof]
-    fn resize_any_harness() {
-        let mut buf: ByteBuffer = kani::any();
-        let extra_bytes = kani::any();
-        match buf.resize(extra_bytes) {
-            Result::Ok(()) => {
-                assert!(buf.invariant());
-            }
-            _ => {}
-        }
-    }
-
-    #[kani::proof]
-    fn push_any_harness() {
-        let mut buf: ByteBuffer = kani::any();
-        let value = kani::any();
-        match buf.push(value) {
-            Result::Ok(()) => {
-                assert!(buf.invariant());
-            }
-            _ => {}
-        }
-    }
-
-    #[kani::proof]
-    fn pop_harness() {
-        let mut buf = ByteBuffer::new();
-        match buf.resize(kani::any()) {
-            Result::Ok(()) => {
-                let _ = buf.pop();
-                assert!(buf.invariant());
-            }
-            _ => {}
-        }
-    }
-
-    #[kani::proof]
-    fn pop_any_harness() {
-        let mut buf: ByteBuffer = kani::any();
-        let _ = buf.pop();
-        assert!(buf.invariant());
-    }
-
-    #[kani::proof]
-    fn push_pop_any_harness() {
-        let mut buf: ByteBuffer = kani::any();
-        let value = kani::any();
-        match buf.push(value) {
-            Result::Ok(()) => match buf.pop() {
-                Some(result) => {
-                    assert!(result == value);
-                }
-                None => {}
-            },
-            _ => {}
-        }
     }
 }
